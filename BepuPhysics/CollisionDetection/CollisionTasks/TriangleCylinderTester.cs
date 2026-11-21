@@ -1,4 +1,4 @@
-﻿using BepuPhysics.Collidables;
+using BepuPhysics.Collidables;
 using BepuUtilities;
 using System;
 using System.Numerics;
@@ -52,9 +52,15 @@ namespace BepuPhysics.CollisionDetection.CollisionTasks
             var abDot = ap.X * projectedAB.Y - ap.Y * projectedAB.X;
             var bcDot = bp.X * projectedBC.Y - bp.Y * projectedBC.X;
             var caDot = cp.X * projectedCA.Y - cp.Y * projectedCA.X;
-            var sum = Vector.GreaterThan(abDot, Vector<float>.Zero) + Vector.GreaterThan(bcDot, Vector<float>.Zero) + Vector.GreaterThan(caDot, Vector<float>.Zero);
+            //All three above zero, or none. Combined bitwise rather than summed and compared with integers: Mono's LLVM AOT types a float
+            //comparison's mask as floats, and asserts on an integer compare or sum over it.
+            var abAbove = Vector.GreaterThan(abDot, Vector<float>.Zero);
+            var bcAbove = Vector.GreaterThan(bcDot, Vector<float>.Zero);
+            var caAbove = Vector.GreaterThan(caDot, Vector<float>.Zero);
+            var allAbove = Vector.BitwiseAnd(abAbove, Vector.BitwiseAnd(bcAbove, caAbove));
+            var anyAbove = Vector.BitwiseOr(abAbove, Vector.BitwiseOr(bcAbove, caAbove));
 
-            var contained = Vector.BitwiseAnd(allowContact, Vector.BitwiseOr(Vector.Equals(sum, Vector<int>.Zero), Vector.Equals(sum, new Vector<int>(-3))));
+            var contained = Vector.BitwiseOr(Vector.BitwiseAnd(allowContact, allAbove), Vector.AndNot(allowContact, anyAbove));
             Unsafe.SkipInit(out ManifoldCandidate candidate);
             candidate.X = point.X;
             candidate.Y = point.Y;
@@ -162,7 +168,7 @@ namespace BepuPhysics.CollisionDetection.CollisionTasks
             TriangleWide.ComputeNondegenerateTriangleMask(triangleAB, triangleCA, triangleNormalLength, out var triangleEpsilonScale, out var nondegenerateMask);
             inactiveLanes = Vector.BitwiseOr(Vector.OnesComplement(nondegenerateMask), inactiveLanes);
             inactiveLanes = Vector.BitwiseOr(cylinderInsideAndBelowTriangle, inactiveLanes);
-            if (Vector.LessThanAll(inactiveLanes, Vector<int>.Zero))
+            if (Vector.LessThanAll(LaneMask.AsInt(inactiveLanes), Vector<int>.Zero))
             {
                 //All lanes are either inactive or were found to have a depth lower than the speculative margin, so we can just quit early.
                 manifold = default;
@@ -217,7 +223,7 @@ namespace BepuPhysics.CollisionDetection.CollisionTasks
             //If the cylinder is too far away or if it's on the backside of the triangle, don't generate any contacts.
             Vector3Wide.Dot(triangleNormal, localNormal, out var faceNormalADotNormal);
             inactiveLanes = Vector.BitwiseOr(inactiveLanes, Vector.BitwiseOr(Vector.GreaterThan(faceNormalADotNormal, new Vector<float>(-TriangleWide.BackfaceNormalDotRejectionThreshold)), Vector.LessThan(depth, depthThreshold)));
-            if (Vector.LessThanAll(inactiveLanes, Vector<int>.Zero))
+            if (Vector.LessThanAll(LaneMask.AsInt(inactiveLanes), Vector<int>.Zero))
             {
                 //All lanes are either inactive or were found to have a depth lower than the speculative margin, so we can just quit early.
                 manifold = default;
@@ -236,7 +242,7 @@ namespace BepuPhysics.CollisionDetection.CollisionTasks
             Unsafe.SkipInit(out Vector3Wide localOffsetB1);
             Unsafe.SkipInit(out Vector3Wide localOffsetB2);
             Unsafe.SkipInit(out Vector3Wide localOffsetB3);
-            if (Vector.LessThanAny(useCap, Vector<int>.Zero))
+            if (Vector.LessThanAny(LaneMask.AsInt(useCap), Vector<int>.Zero))
             {
                 //At least one lane needs a cap-face manifold.
                 int byteCount = Unsafe.SizeOf<ManifoldCandidate>() * 10;
